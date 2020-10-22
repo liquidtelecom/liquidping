@@ -30,6 +30,7 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 	"unsafe"
@@ -117,10 +118,19 @@ func NewPoller(Dest string, Source string, Frequency int, Out chan interface{}) 
 		*(*uint16)(unsafe.Pointer(&res.Dest.IP[8])) == 0 &&
 		*(*uint16)(unsafe.Pointer(&res.Dest.IP[10])) == 0xFFFF {
 		res.IsIPv4 = true
-		res.network = "udp4"
+		if runtime.GOOS == "windows" {
+			res.network = "ip4:icmp"
+		} else {
+			res.network = "udp4"
+
+		}
 	} else {
 		res.IsIPv4 = false
-		res.network = "udp6"
+		if runtime.GOOS == "windows" {
+			res.network = "ip6:icmp"
+		} else {
+			res.network = "udp6"
+		}
 	}
 	res.PacketInterval = 1 * time.Second
 	res.Timeout = 1 * time.Second
@@ -259,14 +269,18 @@ func (p *Poller) Run(ErrorChan chan *Poller, QueueChan chan bool) {
 			ErrorChan <- p
 			return
 		}
-		if p.IsIPv4 {
-			_ = conn.IPv4PacketConn().SetControlMessage(ipv4.FlagTTL, true)
-		} else {
-			_ = conn.IPv6PacketConn().SetControlMessage(ipv6.FlagHopLimit, true)
+		if runtime.GOOS != "windows" {
+			if p.IsIPv4 {
+				_ = conn.IPv4PacketConn().SetControlMessage(ipv4.FlagTTL, true)
+			} else {
+				_ = conn.IPv6PacketConn().SetControlMessage(ipv6.FlagHopLimit, true)
+			}
 		}
 		rChan, sChan := make(chan bool), make(chan bool)
 		go p.ReceivePackets(conn, rChan, sChan)
-		p.SendPacket(conn, rChan, sChan)
+		if SendErr := p.SendPacket(conn, rChan, sChan); SendErr != nil {
+			ErrorChan <- &Poller{Dest: p.Dest, ErrStatus: SendErr, Running: false}
+		}
 		p.OutChannel <- p.RecvPackets
 		close(rChan)
 		close(sChan)
@@ -336,27 +350,30 @@ func (p *Poller) ReceivePackets(conn *icmp.PacketConn, RecvChan chan bool, SendC
 }
 
 // SendPacket is the packet sender - this should be started normally so that it blocks until end of poller cycle
-func (p *Poller) SendPacket(conn *icmp.PacketConn, RecvChan chan bool, SendChan chan bool) {
+func (p *Poller) SendPacket(conn *icmp.PacketConn, RecvChan chan bool, SendChan chan bool) error {
 	Count := uint16(0)
-	dst := &net.UDPAddr{IP: p.Dest.IP, Zone: p.Dest.Zone}
+	var dst net.Addr = p.Dest
+	if runtime.GOOS != "windows" {
+		dst = &net.UDPAddr{IP: p.Dest.IP, Zone: p.Dest.Zone}
+	}
 	for {
 		p.GenericPacket.SetSeq(Count)
 		p.GenericPacket.SetTimestamp(time.Now())
 		p.GenericPacket.SetChecksum()
 		if _, err := conn.WriteTo(p.GenericPacket, dst); err != nil {
-			fmt.Printf("Got error: %v\n", err)
 			SendChan <- false
-			return
+			return err
 		}
 		SendChan <- true
 		if ok := <-RecvChan; !ok {
-			return
+			return fmt.Errorf("receiver signalled an error")
 		}
 		Count++
 		if Count == uint16(p.Count) {
 			break
 		}
 	}
+	return nil
 }
 
 // IsBigEndian is a helper function to test the endianness of the host system
