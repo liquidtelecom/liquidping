@@ -332,13 +332,11 @@ func (p *Poller) ReceivePackets(conn *icmp.PacketConn, RecvChan chan bool, SendC
 						continue
 					}
 				} else {
-					fmt.Printf("Got some other error: %v\n", err)
 					_ = conn.Close()
 					RecvChan <- false
 				}
 			} else {
 				p.RecvPackets[Offset].RecvTime = time.Now()
-				p.RecvPackets[Offset].Buffer = p.RecvPackets[Offset].Buffer[:p.RecvPackets[Offset].RecvSize]
 				Offset++
 				RecvChan <- true
 			}
@@ -640,8 +638,8 @@ func validateFlags(sip, df, d *string, rep, repF, ds, prep, mc *int) ([]string, 
 	if *rep < 1 {
 		return nil, fmt.Errorf("repetitions should be 1 or greater")
 	}
-	if *repF < 30 {
-		return nil, fmt.Errorf("repetition frequency needs to be 30 or larger")
+	if *repF < 5 {
+		return nil, fmt.Errorf("repetition frequency needs to be 5 or larger")
 	}
 	if *mc < 1 {
 		return nil, fmt.Errorf("maximum concurrency must be at least 1")
