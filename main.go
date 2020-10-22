@@ -259,7 +259,7 @@ func (p *Poller) constructEchoRequest(dataLen int) PacketICMP {
 func (p *Poller) Run(ErrorChan chan *Poller, QueueChan chan bool) {
 	var err error
 	var conn *icmp.PacketConn
-	var completed = 0
+	var CompletedRuns = 0
 
 	p.Running = false
 	for {
@@ -286,9 +286,9 @@ func (p *Poller) Run(ErrorChan chan *Poller, QueueChan chan bool) {
 		close(sChan)
 		_ = conn.Close()
 		<-QueueChan
+		CompletedRuns++
 		if p.PollRepetitions > 0 {
-			completed++
-			if completed > p.PollRepetitions {
+			if CompletedRuns > p.PollRepetitions {
 				ErrorChan <- &Poller{ErrStatus: nil, Running: false}
 				return
 			}
