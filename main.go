@@ -184,6 +184,7 @@ func (p *Poller) SetCount(count int) {
 			p.RecvPackets = p.RecvPackets[1:]
 		}
 	}
+	p.Count = count
 	p.notifyChan(UpdatedCount)
 }
 
@@ -326,7 +327,7 @@ func (p *Poller) ReceivePackets(conn *icmp.PacketConn, RecvChan chan bool, SendC
 			if err != nil {
 				if netErr, ok := err.(*net.OpError); ok {
 					if netErr.Timeout() {
-						p.RecvPackets[Offset].Buffer = make([]byte, 0)
+						p.RecvPackets[Offset].RecvSize = 0
 						Offset++
 						RecvChan <- true
 						continue
@@ -503,7 +504,7 @@ func CollateStats(in chan interface{}, jsonOutput, jsonPretty bool, out ...chan 
 			var Avg, Min, Max float64 = 0, 0xFFFF, 0
 			var respCount = float64(0)
 			for _, p := range data.([]*InPkt) {
-				if len(p.Buffer) < 16 {
+				if p.RecvSize == 0 {
 					continue
 				} else {
 					Last := p.GetRTTMillisecond()
@@ -522,7 +523,7 @@ func CollateStats(in chan interface{}, jsonOutput, jsonPretty bool, out ...chan 
 				Avg = Avg / respCount
 				if len(out) > 0 {
 					out[0] <- fmt.Sprintf("[%s] [%d byte payload size] [%.2f%% packet loss] [%.2f Min %.2f Average %.2f Max %.2f Jitter]\n",
-						data.([]*InPkt)[0].Dest, len(data.([]*InPkt)[0].Buffer)-HeaderTotalSize,
+						data.([]*InPkt)[0].Dest, data.([]*InPkt)[0].RecvSize-HeaderTotalSize,
 						Percentage, Min, Avg, Max, Max-Min)
 				} else if jsonOutput {
 					jOut = &jsonStruct{
@@ -544,7 +545,7 @@ func CollateStats(in chan interface{}, jsonOutput, jsonPretty bool, out ...chan 
 					}
 				} else {
 					fmt.Printf("[%s] [%d byte payload size] [%.2f%% packet loss] [%.2f Min %.2f Average %.2f Max %.2f Jitter]\n",
-						data.([]*InPkt)[0].Dest, len(data.([]*InPkt)[0].Buffer)-HeaderTotalSize,
+						data.([]*InPkt)[0].Dest, data.([]*InPkt)[0].RecvSize-HeaderTotalSize,
 						Percentage, Min, Avg, Max, Max-Min)
 				}
 			} else {
@@ -597,9 +598,9 @@ func main() {
 				Pollers[i].SetRepetitions(*repetitions)
 			}
 			Pollers[i].SetPayloadSize(*dataSize)
-			Pollers[i].SetCount(*packetRep)
 			Pollers[i].SetFrequency(*repFrequency)
 			Pollers[i].Source = *sourceIP
+			Pollers[i].SetCount(*packetRep)
 			go Pollers[i].Run(ErrChan, QueueChan)
 			RunningPollers++
 		} else {
